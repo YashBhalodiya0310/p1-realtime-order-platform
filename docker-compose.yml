@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  order-api:
+    build: ./services/order-api
+    image: order-api:dev
+    ports:
+      - "8000:8000"
+    environment:
+      - SERVICE_NAME=order-api
+    networks:
+      - app-net
+
+  inventory-worker:
+    image: python:3.11-slim
+    command: ["sh", "-c", "echo Inventory worker running && sleep infinity"]
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge
