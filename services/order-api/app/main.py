@@ -1,13 +1,24 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+import os
+import json
 from typing import Dict
 from uuid import uuid4
 from datetime import datetime, timezone
 
-app = FastAPI(title="Order API", version="0.1.0")
+import redis
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
-# In-memory store (temporary)
+app = FastAPI(title="Order API", version="0.2.0")
+
+# In-memory store (temporary for now)
 ORDERS: Dict[str, dict] = {}
+
+# Redis config (global)
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+QUEUE_NAME = os.getenv("QUEUE_NAME", "orders")
+
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 
 class CreateOrderRequest(BaseModel):
@@ -21,6 +32,10 @@ class OrderResponse(BaseModel):
     created_at: str
     item_id: str
     quantity: int
+
+
+class UpdateStatusRequest(BaseModel):
+    status: str = Field(..., min_length=1)
 
 
 @app.get("/health")
@@ -42,6 +57,10 @@ def create_order(req: CreateOrderRequest):
     }
 
     ORDERS[order_id] = order
+
+    # enqueue job for worker
+    redis_client.rpush(QUEUE_NAME, json.dumps({"order_id": order_id}))
+
     return order
 
 
@@ -50,4 +69,15 @@ def get_order(order_id: str):
     order = ORDERS.get(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="order not found")
+    return order
+
+
+@app.patch("/orders/{order_id}/status", response_model=OrderResponse)
+def update_order_status(order_id: str, req: UpdateStatusRequest):
+    order = ORDERS.get(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="order not found")
+
+    order["status"] = req.status
+    ORDERS[order_id] = order
     return order
